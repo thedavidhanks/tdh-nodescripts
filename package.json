@@ -1,0 +1,23 @@
+{
+  "name": "tdh-nodescripts",
+  "version": "0.1.0",
+  "description": "a node backend for tdh",
+  "main": "src/app.js",
+  "scripts": {
+    "test": "nodemon -r dotenv/config src/app.js",
+    "start": "node src/app.js"
+  },
+  "author": "David Hanks",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.17.1",
+    "firebase-admin": "^8.13.0"
+  },
+  "engines": {
+    "node": "13.5"
+  },
+  "devDependencies": {
+    "dotenv": "^8.2.0",
+    "nodemon": "^2.0.4"
+  }
+}
