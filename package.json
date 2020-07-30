@@ -12,7 +12,8 @@
   "dependencies": {
     "express": "^4.17.1",
     "firebase-admin": "^8.13.0",
-    "mysql": "^2.18.1"
+    "mysql": "^2.18.1",
+    "mysql2": "^2.1.0"
   },
   "engines": {
     "node": "13.5"

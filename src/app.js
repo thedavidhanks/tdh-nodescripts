@@ -1,6 +1,6 @@
 const express = require('express');
 const https = require('https');
-const sql_db = require('./include/db_cfg.js').con;
+const sql = require('./include/db_cfg.js');
 const utility = require('./include/utility.js');
 const app = express();
 
@@ -15,11 +15,40 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-//TODO Move function to module
+//
+//Local FUNCTIONS
+//
 async function replaceFSpath(roadTripdocRef, fullgRoadsPath){
     await roadTripdocRef.set({path: fullgRoadsPath});
 }
 
+function getStoredPoints(tripname){
+    //returns a promise with an array of lat long coords  [[lat,long],[lat2,long2],...]
+    const sql_dbTbl = "heroku_bfbb423415a117e.gps_readings";
+    let server_response_arry = [];
+    var query = `SELECT time, lat, ${sql_dbTbl}.long from ${sql_dbTbl} WHERE tripname = "${tripname}" order by time DESC `;
+    return new Promise(function(resolve,reject){
+        sql.con_pool.getConnection()
+        .then( conn => {
+            const res = conn.query(query);
+            conn.release();
+            return res;
+        }).then(result => {            
+            result[0].forEach( result =>{
+                server_response_arry.push([result.lat,result.long]) ;
+                
+                //console.log(count,": ",server_response_arry[count-1]);
+            });
+            resolve(server_response_arry);
+        }).catch(err => {
+            reject(err);
+        });
+    });
+}
+
+//
+//GET or POST requests sent to server
+//
 app.get('/', (req, res) => res.send('Hello World!'));
 app.get('/user', (req, res) => {
     const docRef = db.collection('users').doc('alovelace');
@@ -31,38 +60,19 @@ app.get('/user', (req, res) => {
     })
     .then( () =>res.send("done"));
 });
-app.get('/sql', (req, res) =>{
-    const sql_dbTbl = "heroku_bfbb423415a117e.gps_readings";
-    let server_response_arry = [];
-    let server_response = "";
-    let count = 0;
-    sql_db.connect(function(err) {
-        server_response += "Connecting to SQL \n";
-                
-        if (err) throw err;
-        console.log("Connected! \n");
-        var sql = `SELECT time, lat, ${sql_dbTbl}.long from ${sql_dbTbl} WHERE tripname = "${req.body.tripname}" order by time DESC `;
-        sql_db.query(sql, function (err, results) {
-            if (err) throw err;
-            results.forEach( result =>{
-                //console.log(`{time: "${result.time}", lat: "${result.lat}"", long: "${result.long}"}`);
-                count = server_response_arry.push(`{time: "${result.time}", lat: "${result.lat}", long: "${result.long}"}`) ;
-                //count = server_response_arry.push(result.long);
-                console.log(count,": ",server_response_arry[count-1]);
-            });
-        });
+
+//REMOVE - this was a test of the promise function  getStoredPoints
+app.get('/sql', (req,res) =>{
+    let server_response = "started \n";
+    getStoredPoints(req.body.tripname).then( result => {
+        let shortlist = utility.points_closer_than_x(result,1000);
+        server_response += utility.arry_to_roadsString(shortlist)+"\n";
+        server_response += "end \n";
+        res.send(server_response);
     });
-    //The below executes before the result from the sql query is obtained
-    //TODO wrap the SQL query in a promise, then continue with the functions
-    //  try async function: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function
-    //  or try older promises: https://codeburst.io/node-js-mysql-and-promises-4c3be599909b
-    //  or try mysql2 https://evertpot.com/executing-a-mysql-query-in-nodejs/
-    console.log("END.",server_response_arry.join());
-    if(Array.isArray(server_response_arry)){ console.log("It's a array");}
-    else{ console.log("It's not an array");};
-    res.json("{"+server_response_arry.join()+"}");
-});
-app.post('/gps-tracker', (req, res) => {
+});  
+
+app.post('/gps-tracker', async function(req, res){
     //This path is used by the gps tracker to add points to the Firestore path document
     //let server_response = typeof req.body.mode;
     let server_response = "accessed gps-tracker \n ";
@@ -85,74 +95,54 @@ app.post('/gps-tracker', (req, res) => {
             
             //TODO check that req.body.tripname is included in post request
             //connect to the database
-            let arry_recorded_coords = [];
             let subset_recorded_coords = [];
             const max_dist_btw_pts = 1000; //meters
             let fullgRoadsPath = [];  //[ [lat1, long1], [lat1, long1],...]
-            const roadTripdocRef = db.collection('Trips').doc(req.body.tripname);
-            const sql_dbTbl = "heroku_bfbb423415a117e.gps_readings";
-            
-            sql_db.connect(function(err) {
-                if (err) {server_response += "SQL error: "+err+"\n";}
-                else{
-                    server_response += "Connected to SQL! \n";
-                    var sel_query = `SELECT time, lat, ${sql_dbTbl}.long from ${sql_dbTbl} WHERE tripname = "${req.body.tripname}" order by time DESC `;
-                    //get all the recorded points
-                    sql_db.query(sel_query, function (err, result) {
-                    if (err) {server_response += err;}
-                    else{
-                        result.forEach(row => {
-                           //create an array {var arry_recorded_coords} of the results [ [lat1,long1],[lat2,long2],...]
-                           //res.send(row.lat+','+row.long+'\n');
-                           arry_recorded_coords.push([row.lat,row.long]);
+            const roadTripdocRef = db.collection('Trips').doc(tripname);
+            console.log(tripname,"\n");
+            await getStoredPoints(tripname).then((arry_recorded_coords) => { 
+                    console.log("104 - got here. \n",arry_recorded_coords.length);
+                    while(arry_recorded_coords.length > 1){
+                        console.log("106 - got here. \n");
+                        subset_recorded_coords = utility.points_closer_than_x(arry_recorded_coords,max_dist_btw_pts);
+                        let subset_string = utility.arry_to_roadsString(subset_recorded_coords);
+                        let gRoadsRequest=`https://roads.googleapis.com/v1/snapToRoads?path=${subset_string}&interpolate=true&key=${process.env.GROADS_API_KEY}`;
+                        console.log("gRoadsRequest: "+gRoadsRequest+"\n");
+                        //TODO the Google roads request sometimes returns an error.
+                        //consider using the Google directions API
+                        //Make a gRoads API query with the subset
+                            
+                        https.get(gRoadsRequest, (resp) => {
+                          let data = '';
+
+                          // A chunk of data has been recieved.
+                          resp.on('data', (chunk) => {
+                            data += chunk;
+                          });
+
+                          resp.on('end', () => {
+                            //Add all new points to the fullgRoadsPath array   
+                            let gPath = JSON.parse(data).snappedPoints;
+                            for( const point in gPath){
+                                fullgRoadsPath.push([point.location.latitude,point.location.longitude]);
+                            }
+                          });
+                        }).on("error", (err) => {
+                          res.send("Error gRoads: " + err.message);
                         });
+                        let last_in_subset = subset_recorded_coords[subset_recorded_coords.length - 1]; //last element
+                        //remove the coordiantes that were sent to google API
+                        arry_recorded_coords.splice(0,arry_recorded_coords.indexOf(last_in_subset)+1);   
                     }
-                    });
-                }
-            });
-            
-            //if an array was created, 
-            //  create a string to send to google Roads API
-            //  shorten the array by the points sent to google Roads API
-            //  make a gRoads request
-            //  store the result in Firestore
-            //  do it again
-            
-            if(Array.isArray(arry_recorded_coords) && arry_recorded_coords.length){
-                while(arry_recorded_coords.length > 0){
-                    subset_recorded_coords = utility.points_closer_than_x(arry_recorded_coords,max_dist_btw_pts);
-                    let subset_string = utility.arry_to_roadsString(subset_recorded_coords);
-                    let gRoadsRequest='https://roads.googleapis.com/v1/snapToRoads?${subset_string}&key=${GROADS_API_KEY}';
-                    //Make a gRoads API query with the subset
-                    
-
-                    https.get(gRoadsRequest, (resp) => {
-                      let data = '';
-
-                      // A chunk of data has been recieved.
-                      resp.on('data', (chunk) => {
-                        data += chunk;
-                      });
-
-                      resp.on('end', () => {
-                        //Add all new points to the fullgRoadsPath array   
-                        let gPath = JSON.parse(data).snappedPoints;
-                        for( const point in gPath){
-                            fullgRoadsPath.push([point.location.latitude,point.location.longitude]);
-                        }
-                      });
-                    }).on("error", (err) => {
-                      res.send("Error: " + err.message);
-                    });
-                    let last_in_subset = subset_recorded_coords[subset_recorded_coords.length - 1]; //last element
-                    //remove the coordiantes that were sent to google API
-                    arry_recorded_coords.splice(0,arry_recorded_coords.indexOf(last_in_subset)+1);   
-                }
-                
-                //TODO overwrite the Firestore path doc with gRoadsPath
-                replaceFSpath(roadTripdocRef, fullgRoadsPath)
-                        .then(()=>{res.send("Path overwritten in Firestore");});
-            }
+                    replaceFSpath(roadTripdocRef, fullgRoadsPath)
+                        .then(()=> server_response += "Path overwritten in Firestore")
+                        .catch((err) => console.log("Error writing to Firestore: ",err));
+                })
+                .catch((err) => console.log(err));
+        //TODO the code leaves the switch statement before the data is resolved.
+        //the entire switch-case statement needs to be an asyc funct
+        // see: https://stackoverflow.com/questions/40185880/making-a-promise-work-inside-a-javascript-switch-case
+        // or: https://stackoverflow.com/questions/54281977/how-to-resolve-a-different-promise-in-each-case-of-a-switch-block-and-pass-their/54282061
             break;
         case "addPointToPath":
             //adds one point to the Firestore path document for the specified trip
@@ -162,7 +152,7 @@ app.post('/gps-tracker', (req, res) => {
             break;
     }
     }
-    res.send(server_response);
+    //res.send(server_response);
 });
 
 app.listen(port, () => console.log(`Example app listening at http://localhost:${port}`));

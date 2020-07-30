@@ -16,7 +16,7 @@ function great_circle_arc(a,b){
     const distance_radians = 2*Math.asin(Math.sqrt((Math.sin((lat1_rad-lat2_rad)/2)) ** 2 
             + Math.cos(lat1_rad)*Math.cos(lat2_rad)*(Math.sin((long1_rad-long2_rad)/2)) ** 2));
     
-    console.log("radians: ",distance_radians,"\n");
+    //console.log("radians: ",distance_radians,"\n");
     return distance_radians;
 }
 
@@ -27,7 +27,7 @@ function meters_a_b(a,b){
     //console.log("Nautical Miles: ",dist_nm,"\n");
     const dist_meters =  dist_nm*1852;  
     
-    //console.log("meters: ",dist_meters,"\n");
+    console.log("meters: ",dist_meters,"\n");
     return dist_meters;
 }
 function points_closer_than_x(arry_of_coords, x){
