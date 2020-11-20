@@ -1,5 +1,7 @@
 const express = require('express');
 const axios = require('axios');
+const cors = require('cors');
+
 const sql = require('./include/db_cfg.js');
 const utility = require('./include/utility.js');
 const app = express();
@@ -60,7 +62,27 @@ function fnpromise(result){
 //
 //GET or POST requests sent to server
 //
+app.use(cors());
 app.get('/', (req, res) => res.send('Hello World!'));
+app.get('/embedinsta',(req,resp) => {
+    
+    //send a request to facebook for an instagram post
+    let url = 'https://graph.facebook.com/v9.0/instagram_oembed/';
+    //let param =  '?url=https://www.instagram.com/p/{postid}/&access_token=secretcode';
+    if(req.query.postid){
+        axios.get(url,{
+        params: {
+          url: `https://www.instagram.com/p/${req.query.postid}/`,
+          access_token: process.env.FB_APP_ACCESS_TOKEN
+        }})
+        .then(res => {
+            console.log(res.data);
+            resp.send(res.data);})
+        .catch( e => console.log("error fetching insta"+e));
+    }else{
+        resp.send("include a postid parameter");
+    }
+});
 
 app.post('/gps-tracker', async function(req, res){
     //This path is used by the gps tracker to add points to the Firestore path document
